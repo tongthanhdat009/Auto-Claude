@@ -10,7 +10,7 @@
  * - Classification fields (collapsible)
  * - Review requirement checkbox
  */
-import { useRef, useState, useEffect, type ReactNode } from "react";
+import { useRef, useState, useEffect, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -243,6 +243,37 @@ export function TaskFormFields({
     };
   }, [images, onImagesChange, projectPath, specId]);
 
+  /**
+   * Handle file reference drop from FileTreeItem
+   * Inserts the file reference (@filename) at cursor position in description
+   */
+  const handleFileReferenceDrop = useCallback(
+    (reference: string, data: FileReferenceData) => {
+      const textarea = descriptionRef.current;
+      if (!textarea) return;
+
+      // Get current cursor position
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const currentDescription = description;
+
+      // Insert the reference at cursor position
+      const newDescription =
+        currentDescription.slice(0, start) + reference + currentDescription.slice(end);
+
+      // Update description and focus textarea
+      onDescriptionChange(newDescription);
+
+      // Set cursor position after the inserted reference
+      requestAnimationFrame(() => {
+        const newCursorPos = start + reference.length;
+        textarea.focus();
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+      });
+    },
+    [description, onDescriptionChange]
+  );
+
   // Use the shared image upload hook with translated error messages
   const {
     isDragOver,
@@ -263,6 +294,7 @@ export function TaskFormFields({
       processPasteFailed: t("tasks:form.errors.processPasteFailed"),
       processDropFailed: t("tasks:form.errors.processDropFailed"),
     },
+    onFileReferenceDrop: handleFileReferenceDrop,
   });
 
   /**

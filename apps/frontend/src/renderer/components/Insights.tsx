@@ -293,13 +293,19 @@ export function Insights({ projectId }: InsightsProps) {
     fetchIdeationItems();
   }, [session?.id, sessionIdeationItems, projectId, loadingIdeationItems, ideationItems]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const message = inputValue.trim();
     if (!message || status.phase === 'thinking' || status.phase === 'streaming') return;
 
     setInputValue('');
-    sendMessage(projectId, message);
     setIsUserAtBottom(true); // Resume auto-scroll when user sends a message
+
+    // If there's no active session, create one first
+    if (!session?.id) {
+      await newSession(projectId);
+    }
+
+    sendMessage(projectId, message);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
