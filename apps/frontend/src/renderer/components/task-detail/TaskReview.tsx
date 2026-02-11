@@ -182,6 +182,9 @@ export function TaskReview({
       <DiffViewDialog
         open={showDiffDialog}
         worktreeDiff={worktreeDiff}
+        taskId={task.id}
+        specId={task.specId}
+        projectId={task.projectId}
         onOpenChange={onShowDiffDialog}
       />
 

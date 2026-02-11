@@ -352,6 +352,30 @@ export interface WorktreeDiffFile {
   deletions: number;
 }
 
+/**
+ * Detailed diff content for a single file
+ * Contains hunks showing added/removed lines with context
+ */
+export interface WorktreeFileDiff {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  hunks: DiffHunk[];
+}
+
+export interface DiffHunk {
+  oldStart: number;  // Starting line in old file
+  oldLines: number;  // Number of lines in old file hunk
+  newStart: number;  // Starting line in new file
+  newLines: number;  // Number of lines in new file hunk
+  lines: DiffLine[];
+}
+
+export interface DiffLine {
+  type: 'context' | 'added' | 'removed';
+  content: string;
+  lineNumber?: number;  // Line number in new file (for added/context) or old file (for removed)
+}
+
 // Conflict severity levels from merge system
 export type ConflictSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical';
 

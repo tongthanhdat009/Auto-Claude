@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow, shell, app } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DEFAULT_APP_SETTINGS, DEFAULT_FEATURE_MODELS, DEFAULT_FEATURE_THINKING, MODEL_ID_MAP, THINKING_BUDGET_MAP, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, WorktreeStatus, WorktreeDiff, WorktreeDiffFile, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, SupportedIDE, SupportedTerminal, AppSettings } from '../../../shared/types';
+import type { IPCResult, WorktreeStatus, WorktreeDiff, WorktreeDiffFile, WorktreeFileDiff, DiffHunk, DiffLine, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, SupportedIDE, SupportedTerminal, AppSettings } from '../../../shared/types';
 import path from 'path';
 import { minimatch } from 'minimatch';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
@@ -1899,6 +1899,151 @@ export function registerWorktreeHandlers(
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to get worktree diff'
+        };
+      }
+    }
+  );
+
+  /**
+   * Get the detailed diff for a single file in a task's worktree
+   * Returns parsed hunks showing line-by-line changes
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_WORKTREE_FILE_DIFF,
+    async (_, taskId: string, filePath: string): Promise<IPCResult<WorktreeFileDiff>> => {
+      try {
+        const { task, project } = findTaskAndProject(taskId);
+        if (!task || !project) {
+          return { success: false, error: 'Task not found' };
+        }
+
+        // Find worktree at .auto-claude/worktrees/tasks/{spec-name}/
+        const worktreePath = findTaskWorktree(project.path, task.specId);
+
+        if (!worktreePath) {
+          return { success: false, error: 'No worktree found for this task' };
+        }
+
+        // Get base branch using proper fallback chain
+        const baseBranch = getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+
+        // Get file status from git diff --name-status
+        let fileStatus: 'added' | 'modified' | 'deleted' | 'renamed' = 'modified';
+        try {
+          const nameStatus = execFileSync(getToolPath('git'), ['diff', '--name-status', `${baseBranch}...HEAD`, '--', filePath], {
+            cwd: worktreePath,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe']
+          }).trim();
+
+          if (nameStatus) {
+            const statusChar = nameStatus[0];
+            switch (statusChar) {
+              case 'A': fileStatus = 'added'; break;
+              case 'M': fileStatus = 'modified'; break;
+              case 'D': fileStatus = 'deleted'; break;
+              case 'R': fileStatus = 'renamed'; break;
+            }
+          }
+        } catch (statusError) {
+          console.error('Error getting file status:', statusError);
+        }
+
+        // Get unified diff with context lines
+        const hunks: DiffHunk[] = [];
+        try {
+          const diffOutput = execFileSync(getToolPath('git'), ['diff', `${baseBranch}...HEAD`, '--', filePath], {
+            cwd: worktreePath,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe']
+          });
+
+          // Parse unified diff format
+          // Header: @@ -oldStart,oldLines +newStart,newLines @@
+          const hunkRegex = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+          const lines = diffOutput.split('\n');
+
+          let currentHunk: DiffHunk | null = null;
+          let inHunk = false;
+
+          for (const line of lines) {
+            // Check for hunk header
+            const hunkMatch = line.match(hunkRegex);
+            if (hunkMatch) {
+              // Save previous hunk if exists
+              if (currentHunk) {
+                hunks.push(currentHunk);
+              }
+
+              // Start new hunk
+              const oldStart = parseInt(hunkMatch[1], 10);
+              const oldLines = hunkMatch[2] ? parseInt(hunkMatch[2], 10) : 1;
+              const newStart = parseInt(hunkMatch[3], 10);
+              const newLines = hunkMatch[4] ? parseInt(hunkMatch[4], 10) : 1;
+
+              currentHunk = {
+                oldStart,
+                oldLines,
+                newStart,
+                newLines,
+                lines: []
+              };
+              inHunk = true;
+              continue;
+            }
+
+            // Skip diff headers (lines starting with +++ or ---)
+            if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff') || line.startsWith('index')) {
+              continue;
+            }
+
+            // Parse hunk lines
+            if (inHunk && currentHunk && line.length > 0) {
+              let lineType: 'context' | 'added' | 'removed' = 'context';
+              let content = line;
+
+              if (line.startsWith('+')) {
+                lineType = 'added';
+                content = line.slice(1);
+              } else if (line.startsWith('-')) {
+                lineType = 'removed';
+                content = line.slice(1);
+              } else if (line.startsWith(' ')) {
+                content = line.slice(1);
+              }
+
+              currentHunk.lines.push({
+                type: lineType,
+                content
+              });
+            }
+          }
+
+          // Push last hunk
+          if (currentHunk) {
+            hunks.push(currentHunk);
+          }
+        } catch (diffError) {
+          console.error('Error getting file diff:', diffError);
+          return {
+            success: false,
+            error: diffError instanceof Error ? diffError.message : 'Failed to get file diff'
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            path: filePath,
+            status: fileStatus,
+            hunks
+          }
+        };
+      } catch (error) {
+        console.error('Failed to get worktree file diff:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get file diff'
         };
       }
     }

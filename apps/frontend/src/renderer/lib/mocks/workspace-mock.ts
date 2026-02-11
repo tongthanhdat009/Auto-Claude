@@ -18,6 +18,15 @@ export const workspaceMock = {
     }
   }),
 
+  getWorktreeFileDiff: async () => ({
+    success: true,
+    data: {
+      path: 'src/example.ts',
+      status: 'modified' as const,
+      hunks: []
+    }
+  }),
+
   mergeWorktree: async () => ({
     success: true,
     data: {
